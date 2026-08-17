@@ -1,0 +1,10 @@
+{
+  "name": "calendar",
+  "version": "0.1.0",
+  "description": "Calendar, memos and reminders for ADHD brains. Local-first MCP tools (pure Python stdlib, your data never leaves your machine) plus a liquid-glass calendar page with iOS 26-style refraction.",
+  "author": { "name": "jiwanjia" },
+  "homepage": "https://github.com/jiwanjia/calendar",
+  "repository": "https://github.com/jiwanjia/calendar",
+  "license": "MIT",
+  "keywords": ["calendar", "memo", "reminder", "adhd", "liquid-glass", "productivity"]
+}

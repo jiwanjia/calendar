@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>calendar · quiet days</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<style>
+*{ margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body{ width:100%; height:100%; overflow:hidden; }
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
+  background:#f0f2f5; color:#1a1a2e;
+}
+button{ cursor:pointer; border:none; background:none; font:inherit; color:inherit; }
+
+/* ── app 壳：窄屏全屏，宽屏浮在居中的圆角卡片里 ── */
+#app{
+  width:100%; height:100%; max-width:480px; margin:0 auto;
+  display:flex; flex-direction:column; overflow:hidden;
+  position:relative;
+}
+@media(min-width:481px){
+  body{ display:flex; justify-content:center; align-items:center; }
+  #app{ height:92vh; max-height:820px; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,.12); }
+}
+
+/* ── Pearl 主题变量 ── */
+.pearl{
+  --pearl-bg:#eef3f6;
+  --pearl-text:#253447;
+  --pearl-text-soft:#5e7080;
+  --pearl-text-faint:#8a99a8;
+  --pearl-accent:#4c6378;
+  --pearl-accent-deep:#2c4056;
+  --pearl-hairline:rgba(120,142,165,.24);
+  --pearl-field-bg:rgba(255,255,255,.55);
+  --pearl-field-line:rgba(255,255,255,.7);
+  --pearl-card-bg:rgba(248,251,253,.65);
+  --pearl-card-line:rgba(150,168,182,.55);
+  --pearl-shadow:0 10px 26px rgba(86,104,118,.10);
+  --cal-stroke:rgba(255,255,255,.78);
+  --pearl-scrim1:rgba(238,243,246,1);
+  --pearl-scrim2:rgba(232,240,246,.7);
+  --font-en:"Cormorant Garamond",Georgia,serif;
+  --font-cn:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --font-script:"Pinyon Script","Cormorant Garamond",cursive;
+}
+
+/* ── 墙：渐变 + 柔光斑当背景（给折射提供可被扭曲的光）。
+   注意：玻璃折射只作用于它背后的墙——背景越有层次，折射越明显。 */
+.wall{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+.wall-bg{ position:absolute; inset:-20%;
+  background:
+    radial-gradient(ellipse 60% 45% at 22% 12%, rgba(244,180,196,.68), transparent 56%),
+    radial-gradient(ellipse 50% 40% at 82% 88%, rgba(168,202,230,.62), transparent 54%),
+    radial-gradient(ellipse 40% 32% at 70% 16%, rgba(250,225,190,.6), transparent 55%),
+    radial-gradient(ellipse 46% 36% at 12% 84%, rgba(214,196,232,.52), transparent 58%),
+    radial-gradient(ellipse 30% 24% at 48% 52%, rgba(255,255,255,.5), transparent 60%),
+    linear-gradient(168deg, #f8eef0 0%, #eef3f6 55%, #f2edea 100%); }
+/* 噪点纸纹：SVG feTurbulence 内嵌，给折射提供可被扭曲的细节（渐变太光滑时折射看不出） */
+.wall-grain{ position:absolute; inset:0; opacity:.2; mix-blend-mode:multiply;
+  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/></filter><rect width="140" height="140" filter="url(%23n)"/></svg>'); }
+/* 点阵：规则的细点经过玻璃边缘时会被折射扭弯——最直观的"光真的弯了" */
+.wall-dots{ position:absolute; inset:0; opacity:.3;
+  background-image:radial-gradient(circle, rgba(76,99,120,.9) 1.3px, transparent 1.9px);
+  background-size:22px 22px; }
+.wall-scrim{ position:absolute; inset:0; z-index:2;
+  background:linear-gradient(180deg, rgba(255,245,240,.35) 0%, rgba(255,245,240,.12) 35%, rgba(248,245,242,.1) 65%, rgba(245,240,235,.3) 100%); }
+
+/* ── Pearl 通用组件 ── */
+.pearl{ font-family:var(--font-cn); color:var(--pearl-text); height:100%; display:flex; flex-direction:column; overflow:hidden; }
+.pearl .bar{
+  position:relative; z-index:20; flex-shrink:0;
+  display:flex; align-items:flex-start; gap:6px;
+  padding:calc(6px + env(safe-area-inset-top,0px)) 14px 4px;
+}
+.pearl .bar .icon{
+  width:34px; height:34px; display:grid; place-items:center; border-radius:50%;
+  color:var(--pearl-text); font-size:17px; transition:background .2s; flex-shrink:0;
+}
+.pearl .bar .icon:active{ background:var(--pearl-hairline); }
+.pearl .bar .icon svg{ width:20px; height:20px; }
+.pearl .bar .grow{ flex:1; min-width:0; }
+.pearl .top-label{
+  font-family:var(--font-en); font-size:11px; font-weight:500;
+  letter-spacing:.3em; line-height:1.3; color:var(--pearl-text-faint); text-align:right;
+  flex-shrink:0;
+}
+.pearl .top-label .rule{ display:block; width:24px; height:1px; background:var(--pearl-hairline); margin:4px 0 0 auto; }
+.pearl .wrap{ position:relative; z-index:3; padding:0 14px 16px; }
+.pearl .hero{ text-align:left; padding:2px 0 6px; }
+.pearl .hero h1{
+  font-family:var(--font-script); font-weight:400; color:var(--pearl-text);
+  font-size:clamp(28px,9vw,40px); line-height:1; margin:0;
+}
+.pearl .hero .sub{
+  font-family:var(--font-en); font-style:italic; font-size:clamp(12px,3.5vw,15px);
+  color:var(--pearl-text-soft); margin-top:0; letter-spacing:.01em;
+}
+.pearl .footer{ text-align:center; padding:30px 0 6px; }
+.pearl .footer h3{
+  font-family:var(--font-script); font-weight:400; font-size:28px;
+  color:var(--pearl-text); margin:0; line-height:1;
+}
+.pearl .footer p{
+  font-family:var(--font-en); font-style:italic; font-size:12.5px;
+  color:var(--pearl-text-faint); margin:7px 0 0; letter-spacing:.04em;
+}
+.pearl .scroll-area{ flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; position:relative; z-index:3; }
+
+/* ── 日历 ── */
+.cal-head{ display:flex; align-items:center; justify-content:space-between; margin:4px 0 10px; }
+.cal-title{ font-family:Georgia,"Songti SC",serif; font-size:15px; color:var(--pearl-text); letter-spacing:1px; }
+.cal-nav{ width:34px; height:34px; border:none; border-radius:50%; background:transparent; color:var(--pearl-text); display:grid; place-items:center; cursor:pointer; transition:background .2s,color .2s; }
+.cal-nav:hover{ color:var(--pearl-accent); }
+.cal-nav:active{ background:var(--pearl-hairline); }
+.cal-nav svg{ width:20px; height:20px; }
+.cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.cal-week{ margin-bottom:6px; }
+.cal-week span{ text-align:center; font-size:11px; color:var(--pearl-text-faint); letter-spacing:1px; padding:2px 0; }
+/* 整块液态玻璃日历板 + 手画分隔线：实线贯穿玻璃，两端超出玻璃随机长度渐隐收笔 */
+.cal-board{ position:relative; padding:6px; border-radius:18px; }
+.cal-board::before{ content:''; position:absolute; inset:0; border-radius:18px; z-index:0;
+  background:none;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+  -webkit-mask-image:radial-gradient(ellipse 108% 108% at 50% 50%, #000 60%, transparent 100%);
+  mask-image:radial-gradient(ellipse 108% 108% at 50% 50%, #000 60%, transparent 100%); }
+.cal-inner{ position:relative; z-index:1; }
+.cal-strokes{ position:absolute; inset:0; z-index:2; pointer-events:none; }
+.cal-stroke{ position:absolute; }
+.cal-stroke.h{ height:1.5px; transform:translateY(-50%); }
+.cal-stroke.v{ width:1.5px; transform:translateX(-50%); }
+.cal-cell{ position:relative; aspect-ratio:1; background:transparent; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+.cal-cell.dim{ opacity:.35; }
+.cal-cell:hover{ background:rgba(255,255,255,.14); }
+.cal-cell.today::after{ content:''; position:absolute; inset:6% 10%; border-radius:50%; z-index:-1;
+  background:radial-gradient(ellipse at center, rgba(76,99,120,.32), transparent 70%); filter:blur(2px); }
+.cal-cell.today .cal-num{ color:var(--pearl-accent); font-weight:700; }
+.cal-num{ font-size:13.5px; color:var(--pearl-text); }
+.cal-badges{ display:flex; gap:3px; font-size:10px; min-height:13px; }
+/* 日期详情：横屏在右侧、竖屏在下方展开的横纹面板 */
+.cal-layout{ display:flex; flex-direction:column; gap:12px; }
+.cal-daypanel{ position:relative; border:none; background:none; box-shadow:none; padding:2px 2px 6px; }
+.cal-daypanel::before{ content:''; position:absolute; inset:0; border-radius:16px; z-index:0;
+  background:none;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+  -webkit-mask-image:radial-gradient(ellipse 106% 106% at 50% 50%, #000 70%, transparent 100%);
+  mask-image:radial-gradient(ellipse 106% 106% at 50% 50%, #000 70%, transparent 100%); }
+.cal-daypanel > *{ position:relative; z-index:1; }
+.cal-daypanel-head{ display:flex; align-items:center; justify-content:space-between;
+  padding:2px 4px 7px; margin-bottom:6px;
+  border-bottom:1px solid rgba(255,255,255,.7); }
+.cal-daypanel-date{ font-family:var(--font-en); font-size:15px; color:#000; letter-spacing:1px; }
+.cal-daypanel-close{ width:26px; height:26px; border-radius:50%; display:grid; place-items:center; color:#000; font-size:13px; transition:background .2s; }
+.cal-daypanel-close:active{ background:var(--pearl-hairline); }
+/* 横纹：无框无底，每行下面一条白色实线，字体纯黑 */
+.stripe{ display:flex; align-items:center; gap:8px; padding:8px 6px;
+  border:none; border-bottom:1px solid rgba(255,255,255,.7); background:none;
+  font-size:13px; color:#000; line-height:1.5; }
+.stripe:last-child{ border-bottom:none; }
+.stripe .stripe-ico{ flex-shrink:0; }
+.stripe-write{ cursor:pointer; }
+.stripe-write:hover{ opacity:.65; }
+.stripe-empty{ opacity:.55; }
+.cal-hint{ font-size:11px; color:var(--pearl-text-soft); text-align:center; margin-top:8px; }
+/* 宽横屏：日历保持原宽度不动，详情面板浮到 app 右侧的空白处 */
+@media (orientation:landscape) and (min-width:920px){
+  .cal-daypanel{ position:fixed; z-index:30;
+    left:calc(50% + 258px); top:50%; transform:translateY(-50%);
+    width:clamp(180px, calc(50vw - 292px), 320px);
+    max-height:min(92vh, 820px); overflow-y:auto; }
+}
+/* Chrome 桌面：真·iOS 26 折射玻璃——SVG feDisplacementMap 把玻璃背后的光真正"扭曲"：
+   blur 0 / saturate 1 / 白底 0，只有圆角边缘折射 + 一丝高光，不改变颜色。
+   其它浏览器没有玻璃、保持原样透明。 */
+.chromium .cal-board::before{ -webkit-mask-image:none; mask-image:none;
+  backdrop-filter:url(#lg-filter-board); -webkit-backdrop-filter:url(#lg-filter-board); }
+.chromium .cal-daypanel::before{ -webkit-mask-image:none; mask-image:none;
+  backdrop-filter:url(#lg-filter-panel); -webkit-backdrop-filter:url(#lg-filter-panel); }
+
+/* ⏰ 提醒弹窗 */
+.remind-popup{ position:fixed; right:18px; bottom:18px; z-index:200; width:min(320px,calc(100vw-36px)); background:var(--pearl-card-bg); border:1px solid var(--pearl-accent); border-radius:12px; padding:12px 14px 10px; box-shadow:0 10px 36px rgba(0,0,0,.18); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); animation:remindIn .35s ease; }
+.remind-popup-title{ font-size:12px; font-weight:700; color:var(--pearl-accent); margin-bottom:6px; letter-spacing:.5px; animation:remindTitlePulse 2.2s ease-in-out infinite; }
+.remind-popup-body{ font-size:13.5px; color:var(--pearl-text); line-height:1.6; display:flex; flex-direction:column; gap:3px; word-break:break-word; }
+.remind-popup-time{ font-size:11px; color:var(--pearl-text-faint,#999); margin-top:6px; }
+.remind-popup-close{ position:absolute; top:8px; right:10px; background:none; border:none; color:var(--pearl-text-soft); font-size:14px; cursor:pointer; padding:2px 4px; }
+.remind-popup-close:hover{ color:var(--pearl-text); }
+@keyframes remindIn{ from{ opacity:0; transform:translateY(14px); } to{ opacity:1; transform:translateY(0); } }
+@keyframes remindTitlePulse{ 0%,100%{ opacity:1; } 50%{ opacity:.55; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="pearl">
+    <div class="wall"><div class="wall-bg"></div><div class="wall-grain"></div><div class="wall-dots"></div><div class="wall-scrim"></div></div>
+
+    <div class="bar">
+      <button class="icon" @click="refresh" title="刷新数据">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>
+      </button>
+      <span class="grow"></span>
+      <div class="top-label">CALENDAR<br>QUIET DAYS<span class="rule"></span></div>
+    </div>
+
+    <div class="scroll-area">
+      <div class="wrap">
+        <div class="hero" style="padding-top:4px;">
+          <h1>日历</h1>
+          <div class="sub">a calm page for busy brains.</div>
+        </div>
+
+        <div class="cal-layout">
+          <div class="cal-side">
+            <div class="cal-head">
+              <button class="cal-nav" @click="calShift(-1)" title="上个月">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <div class="cal-title">{{ calYear }} 年 {{ calMonth }} 月</div>
+              <button class="cal-nav" @click="calShift(1)" title="下个月">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+              </button>
+            </div>
+
+            <div class="cal-grid cal-week">
+              <span v-for="w in ['一','二','三','四','五','六','日']" :key="w">{{ w }}</span>
+            </div>
+
+            <!-- 整块液态玻璃日历：实线贯穿玻璃、两端超界渐隐 -->
+            <div ref="calBoardEl" class="cal-board">
+              <div class="cal-inner">
+                <div class="cal-strokes">
+                  <div v-for="(l,i) in calLines" :key="i" class="cal-stroke" :class="l.dir"
+                       :style="{top:l.top,left:l.left,width:l.width,height:l.height,background:l.background}"></div>
+                </div>
+                <div class="cal-grid">
+                  <div v-for="c in calCells" :key="c.day" class="cal-cell"
+                       :class="{dim:!c.inMonth, today:c.isToday}"
+                       @click="openCalDay(c)">
+                    <span class="cal-num">{{ c.num }}</span>
+                    <span class="cal-badges">
+                      <span v-for="b in c.badges" :key="b.kind">{{ b.icon }}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日期详情横纹面板：横屏右侧 / 竖屏下方 -->
+          <div v-if="calDetail" ref="calDayPanelEl" class="cal-daypanel">
+            <div class="cal-daypanel-head">
+              <span class="cal-daypanel-date">{{ calDetail.day }}</span>
+              <button class="cal-daypanel-close" @click="calDetail=null" title="收起">✕</button>
+            </div>
+            <div class="stripe stripe-write" @click="hint=!hint">
+              <span class="stripe-ico">✍️</span><span>写一条给这天（让 Claude 帮你写）</span>
+            </div>
+            <div v-if="hint" class="stripe stripe-empty">
+              <span class="stripe-ico">🤖</span><span>跟 Claude 说：calendar add 8月20日 14:30 看牙 category=health。数据存在 ~/.calendar-plugin/</span>
+            </div>
+            <div v-for="(it,i) in calDetailItems" :key="i" class="stripe">
+              <span class="stripe-ico">{{ it.icon }}</span><span>{{ it.text }}</span>
+            </div>
+            <div v-if="!calDetailItems.length" class="stripe stripe-empty">
+              <span class="stripe-ico">🌿</span><span>这一天还空空的～</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="cal-hint" v-if="loadError">{{ loadError }}</div>
+
+        <div class="footer">
+          <h3>日历</h3>
+          <p>every marked day is a promise kept.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⏰ 到点提醒弹窗 -->
+    <div v-if="remPopup" class="remind-popup">
+      <div class="remind-popup-title">⏰ 到点啦</div>
+      <div class="remind-popup-body">
+        <span>{{ remPopup.text }}</span>
+      </div>
+      <div class="remind-popup-time">{{ remPopup.when }}</div>
+      <button class="remind-popup-close" @click="closeReminder" title="知道了">✕</button>
+    </div>
+  </div>
+
+  <!-- iOS 26 折射玻璃滤镜定义（Chrome 桌面专用；JS 按日历板/详情面板的实际尺寸重建） -->
+  <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute; overflow:hidden"
+       color-interpolation-filters="sRGB" aria-hidden="true">
+    <defs id="lg-defs"></defs>
+  </svg>
+</div>
+
+<script>
+const { createApp, ref, nextTick, computed } = Vue;
+
+createApp({
+  setup(){
+    /* Chrome 桌面 → 挂 .chromium 类，启用 url(#) 折射玻璃；
+       手机/平板/Safari 不认 url(#) 滤镜，保持原样透明。 */
+    (function(){
+      const ua=navigator.userAgent||'';
+      if((/\bChrome\//.test(ua)||/\bEdg\//.test(ua)) && !/Mobile|Android|iPhone|iPad/i.test(ua)){
+        document.documentElement.classList.add('chromium');
+      }
+    })();
+
+    // ---- 日历数据（本页只读：数据由 MCP 工具写进 ~/.calendar-plugin/calendar.json，
+    //      --serve 模式把这份 JSON 喂给页面；file:// 直接打开时读不到，页面保持空日历）----
+    const calYm = ref('');
+    const calDays = ref({});
+    const calDetail = ref(null);
+    const hint = ref(false);
+    const loadError = ref('');
+    const calBoardEl = ref(null);
+    const calDayPanelEl = ref(null);
+
+    async function loadCalendar(){
+      try{
+        const r=await(await fetch('calendar.json')).json();
+        calDays.value=r.days||{};
+        loadError.value='';
+        nextTick(lgRebuild);
+      }catch(e){
+        loadError.value='没读到 calendar.json —— 用 python mcp_server.py --serve 打开即可显示数据';
+      }
+    }
+    function goCalendar(){
+      const t=new Date();
+      calYm.value=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');
+      buildCalLines();
+      loadCalendar();
+      nextTick(lgRebuild);   // 玻璃滤镜按实际尺寸重建
+    }
+    function refresh(){ loadCalendar(); }
+    const calYear = computed(()=>parseInt(calYm.value.slice(0,4))||new Date().getFullYear());
+    const calMonth = computed(()=>parseInt(calYm.value.slice(5,7))||1);
+    function calShift(delta){
+      const d=new Date(calYear.value, calMonth.value-1+delta, 1);
+      calYm.value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      buildCalLines();
+    }
+    /* 手画分隔线：按「年*12+月」播种的确定性伪随机——同一个月每次打开线条一样，不闪；
+       5 条横线（6 行之间）+ 6 条竖线（7 列之间），长短不一、像笔划 */
+    function mulberry32(seed){
+      return function(){
+        seed|=0; seed=seed+0x6D2B79F5|0;
+        let t=Math.imul(seed^seed>>>15,1|seed);
+        t=t+Math.imul(t^t>>>7,61|t)^t;
+        return ((t^t>>>14)>>>0)/4294967296;
+      };
+    }
+    const calLines = ref([]);
+    function buildCalLines(){
+      /* 实线贯穿玻璃，两端超出玻璃渐隐收笔：横线 2%–5%、竖线 1.5%–3.5%——
+         竖线收短，最上/最下一排别显得那么长 */
+      const rnd=mulberry32(calYear.value*12+calMonth.value);
+      const lines=[];
+      const mk=(dir,pos)=>{
+        const span=dir==='h'?3:2, base=dir==='h'?2:1.5;
+        const o1=rnd()*span+base, o2=rnd()*span+base;   // 两端超出玻璃的长度（占边长的 %）
+        const total=100+o1+o2;
+        const a=(o1/total*100).toFixed(2), b=((o1+100)/total*100).toFixed(2);
+        const grad=dir==='h'
+          ? `linear-gradient(90deg, transparent 0%, var(--cal-stroke) ${a}%, var(--cal-stroke) ${b}%, transparent 100%)`
+          : `linear-gradient(180deg, transparent 0%, var(--cal-stroke) ${a}%, var(--cal-stroke) ${b}%, transparent 100%)`;
+        return dir==='h'
+          ? {dir, top:pos+'%', left:(-o1).toFixed(2)+'%', width:total.toFixed(2)+'%', height:'1.5px', background:grad}
+          : {dir, left:pos+'%', top:(-o1).toFixed(2)+'%', height:total.toFixed(2)+'%', width:'1.5px', background:grad};
+      };
+      for(let i=1;i<6;i++) lines.push(mk('h', (i*100/6).toFixed(2)));
+      for(let j=1;j<7;j++) lines.push(mk('v', (j*100/7).toFixed(2)));
+      calLines.value=lines;
+    }
+    const calCells = computed(()=>{
+      const y=calYear.value, m=calMonth.value;
+      const first=new Date(y, m-1, 1);
+      let off=first.getDay()-1; if(off<0)off=6;   // 周一开始
+      const start=new Date(y, m-1, 1-off);
+      const today=new Date();
+      const todayStr=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+      const cells=[];
+      for(let i=0;i<42;i++){
+        const d=new Date(start.getFullYear(), start.getMonth(), start.getDate()+i);
+        const ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+        const items=calDays.value[ds]||[];
+        const seen={}, badges=[];
+        items.forEach(it=>{ if(!seen[it.kind]){ seen[it.kind]=1; badges.push({kind:it.kind, icon:it.icon}); } });
+        cells.push({day:ds, num:d.getDate(), inMonth:d.getMonth()===m-1, isToday:ds===todayStr, badges, items});
+      }
+      return cells;
+    });
+    function openCalDay(c){
+      if(calDetail.value && calDetail.value.day===c.day){ calDetail.value=null; return; }
+      calDetail.value={day:c.day};
+      nextTick(lgRebuild);   // 面板刚出现，按实际尺寸重建滤镜
+    }
+    const calDetailItems = computed(()=>{
+      if(!calDetail.value)return [];
+      // 详情面板列出当天的全部条目（日历小徽章才按 kind 去重，面板不去重）
+      return (calDays.value[calDetail.value.day]||[]).map(it=>({kind:it.kind, icon:it.icon, text:it.text}));
+    });
+
+    /* ── iOS 26 液态玻璃折射（Chrome 桌面专用）────────────
+       原理：Snell 定律沿圆角剖面算折射 → 画成位移图（R=dx / G=dy）→
+       SVG feDisplacementMap 把玻璃背后的光真正"扭曲"。
+       blur 0 / saturate 1 / 白底 0：只有圆角边缘折射 + 一丝高光，不改变颜色。
+       （移植自 archisvaze/liquid-glass）
+
+       ⚠️ 陷阱 1（实测）：动画 fill-mode both 会把元素钉在合成层上，
+       backdrop 采样被裁到元素边界内 → 折射直接死掉。
+       所以玻璃元素上永远不要加 fill-mode both 的动画（本页玻璃元素无动画）。
+       ⚠️ 陷阱 2（实测）：位移 = maxDisp×scaleRatio 必须 ≤ 元素高度×0.75——
+       0.9 倍开始边缘带失效，≥1 倍整条滤镜链崩溃（连 blur 都被吞）。
+       日历板高 389px 时位移 ~45px 是甜点。 */
+    const LG = { thickness:80, bezel:60, ior:3.0, scaleRatio:1.25, specOpacity:0.45 };  // scaleRatio=扭曲力度旋钮
+    function lgProfile(bezel, heightFn){
+      const eta=1/LG.ior, samples=128;
+      function refract(nx,ny){
+        const dot=ny, k=1-eta*eta*(1-dot*dot);
+        if(k<0) return null;
+        const sq=Math.sqrt(k);
+        return [-(eta*dot+sq)*nx, eta-(eta*dot+sq)*ny];
+      }
+      const profile=new Float64Array(samples);
+      for(let i=0;i<samples;i++){
+        const x=i/samples, y=heightFn(x);
+        const dx=x<1?0.0001:-0.0001, y2=heightFn(x+dx);
+        const deriv=(y2-y)/dx, mag=Math.sqrt(deriv*deriv+1);
+        const ref=refract(-deriv/mag,-1/mag);
+        if(!ref){ profile[i]=0; continue; }
+        profile[i]=ref[0]*((y*bezel+LG.thickness)/ref[1]);
+      }
+      return profile;
+    }
+    function lgDispMap(w,h,r,bezel,profile,maxDisp){
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx=c.getContext('2d'), img=ctx.createImageData(w,h), d=img.data;
+      for(let i=0;i<d.length;i+=4){ d[i]=128; d[i+1]=128; d[i+2]=0; d[i+3]=255; }
+      const rSq=r*r, r1Sq=(r+1)*(r+1), rBSq=Math.max(r-bezel,0)*Math.max(r-bezel,0);
+      const wB=w-r*2, hB=h-r*2, S=profile.length;
+      for(let y1=0;y1<h;y1++) for(let x1=0;x1<w;x1++){
+        const x=x1<r?x1-r:x1>=w-r?x1-r-wB:0;
+        const y=y1<r?y1-r:y1>=h-r?y1-r-hB:0;
+        const dSq=x*x+y*y;
+        if(dSq>r1Sq||dSq<rBSq) continue;
+        const dist=Math.sqrt(dSq), fromSide=r-dist;
+        const op=dSq<rSq?1:1-(dist-Math.sqrt(rSq))/(Math.sqrt(r1Sq)-Math.sqrt(rSq));
+        if(op<=0||dist===0) continue;
+        const cos=x/dist, sin=y/dist;
+        const bi=Math.min(((fromSide/bezel)*S)|0,S-1);
+        const disp=profile[bi]||0;
+        const dX=(-cos*disp)/maxDisp, dY=(-sin*disp)/maxDisp;
+        const idx=(y1*w+x1)*4;
+        d[idx]=(128+dX*127*op+0.5)|0;
+        d[idx+1]=(128+dY*127*op+0.5)|0;
+      }
+      ctx.putImageData(img,0,0);
+      return c.toDataURL();
+    }
+    function lgSpecMap(w,h,r,bezel,angle){
+      angle=angle!=null?angle:Math.PI/3;
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx=c.getContext('2d'), img=ctx.createImageData(w,h), d=img.data;
+      const rSq=r*r, r1Sq=(r+1)*(r+1), rBSq=Math.max(r-bezel,0)*Math.max(r-bezel,0);
+      const wB=w-r*2, hB=h-r*2, sv=[Math.cos(angle),Math.sin(angle)];
+      for(let y1=0;y1<h;y1++) for(let x1=0;x1<w;x1++){
+        const x=x1<r?x1-r:x1>=w-r?x1-r-wB:0;
+        const y=y1<r?y1-r:y1>=h-r?y1-r-hB:0;
+        const dSq=x*x+y*y;
+        if(dSq>r1Sq||dSq<rBSq) continue;
+        const dist=Math.sqrt(dSq), fromSide=r-dist;
+        const op=dSq<rSq?1:1-(dist-Math.sqrt(rSq))/(Math.sqrt(r1Sq)-Math.sqrt(rSq));
+        if(op<=0||dist===0) continue;
+        const cos=x/dist, sin=-y/dist;
+        const dot=Math.abs(cos*sv[0]+sin*sv[1]);
+        const edge=Math.sqrt(Math.max(0,1-(1-fromSide)*(1-fromSide)));
+        const coeff=dot*edge, col=(255*coeff)|0, alpha=(col*coeff*op)|0;
+        const idx=(y1*w+x1)*4;
+        d[idx]=col; d[idx+1]=col; d[idx+2]=col; d[idx+3]=alpha;
+      }
+      ctx.putImageData(img,0,0);
+      return c.toDataURL();
+    }
+    function lgFilterHtml(id,w,h,radius,bezel,opts){
+      opts=opts||{};
+      const heightFn=(x)=>Math.pow(1-Math.pow(1-x,4),0.25);   // convex squircle 圆角剖面
+      const profile=lgProfile(bezel,heightFn);
+      const maxDisp=Math.max(...Array.from(profile).map(Math.abs))||1;
+      const dispUrl=lgDispMap(w,h,radius,bezel,profile,maxDisp);
+      const specUrl=lgSpecMap(w,h,radius,bezel*2.5);
+      const scale=maxDisp*(opts.scaleRatio||LG.scaleRatio);
+      const blur=opts.blur||0;
+      const blurNode=blur>0?`<feGaussianBlur in="SourceGraphic" stdDeviation="${blur}" result="blurred" />`:'';
+      const dispIn=blur>0?'blurred':'SourceGraphic';
+      return `
+        <filter id="${id}" x="0%" y="0%" width="100%" height="100%">
+          ${blurNode}
+          <feImage href="${dispUrl}" x="0" y="0" width="${w}" height="${h}" result="disp_map" />
+          <feDisplacementMap in="${dispIn}" in2="disp_map" scale="${scale}"
+            xChannelSelector="R" yChannelSelector="G" result="displaced" />
+          <feColorMatrix in="displaced" type="saturate" values="1" result="displaced_sat" />
+          <feImage href="${specUrl}" x="0" y="0" width="${w}" height="${h}" result="spec_layer" />
+          <feComposite in="displaced_sat" in2="spec_layer" operator="in" result="spec_masked" />
+          <feComponentTransfer in="spec_layer" result="spec_faded">
+            <feFuncA type="linear" slope="${LG.specOpacity}" />
+          </feComponentTransfer>
+          <feBlend in="spec_masked" in2="displaced" mode="normal" result="with_sat" />
+          <feBlend in="spec_faded" in2="with_sat" mode="normal" />
+        </filter>`;
+    }
+    let lgResizeTimer=null;
+    /* 滤镜簿：每个玻璃元素一条配方，按尺寸重建后**合并**写进 defs——
+       某次 rebuild 扫不到某元素时也绝不能用空串覆盖整本簿子，否则互相冲掉 */
+    const lgCache = {};
+    function lgRebuild(){
+      if(!document.documentElement.classList.contains('chromium')) return;
+      const defs=document.getElementById('lg-defs');
+      if(!defs) return;
+      const mkPart=(el,id,radius,opts)=>{
+        if(!el) return;
+        const w=el.offsetWidth, h=el.offsetHeight;
+        if(w<10||h<10) return;
+        const bezel=Math.min(LG.bezel, radius-1, Math.min(w,h)/2-1);
+        lgCache[id]=lgFilterHtml(id,w,h,radius,bezel,opts);
+      };
+      mkPart(calBoardEl.value,'lg-filter-board',18);
+      mkPart(calDayPanelEl.value,'lg-filter-panel',16);
+      defs.innerHTML=Object.keys(lgCache).map(k=>lgCache[k]).join('');
+    }
+    window.addEventListener('resize',()=>{ clearTimeout(lgResizeTimer); lgResizeTimer=setTimeout(lgRebuild,150); });
+
+    // ---- 到点提醒：页面轮询 reminders.json，到点弹窗并回报 fired ----
+    const remPopup = ref(null);
+    const firedIds = new Set();
+    function closeReminder(){
+      if(remPopup.value){
+        const id=remPopup.value.id;
+        firedIds.add(id);
+        if(location.protocol.startsWith('http')){
+          fetch('/api/fire',{method:'POST',body:JSON.stringify({id})}).catch(()=>{});
+        }
+      }
+      remPopup.value=null;
+    }
+    async function pollReminders(){
+      try{
+        const r=await(await fetch('reminders.json')).json();
+        const now=new Date();
+        const pad=n=>String(n).padStart(2,'0');
+        const nowStr=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const due=(r.reminders||[]).filter(x=>x.when<=nowStr && !x.fired && !firedIds.has(x.id));
+        if(due.length && !remPopup.value) remPopup.value=due[0];
+      }catch(e){}
+    }
+    if(location.protocol.startsWith('http')){
+      pollReminders();
+      setInterval(pollReminders, 20000);
+    }
+
+    goCalendar();
+
+    return {
+      calYm, calDays, calDetail, hint, loadError, calLines, calCells, calDetailItems,
+      calYear, calMonth, calShift, openCalDay, refresh, calBoardEl, calDayPanelEl,
+      remPopup, closeReminder,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
