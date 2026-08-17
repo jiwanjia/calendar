@@ -1,0 +1,11 @@
+{
+  "name": "jiwanjia-calendar",
+  "owner": { "name": "jiwanjia" },
+  "plugins": [
+    {
+      "name": "calendar",
+      "source": "./",
+      "description": "Calendar, memos and reminders for ADHD brains — local-first MCP tools plus a liquid-glass calendar page."
+    }
+  ]
+}
